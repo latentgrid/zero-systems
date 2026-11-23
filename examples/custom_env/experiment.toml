@@ -1,0 +1,16 @@
+environment = "line_walk:LineWalk-v0"
+network = "mlp"
+channels = 16
+augmentation = false
+reward_weight = 1.0
+search = "puct"
+simulations = 4
+
+schedule = "async"
+games_per_update = 2
+warmup_games = 4
+game_lead = 4
+replay_games = 8
+batch_size = 4
+unroll = 2
+updates = 4

@@ -6,6 +6,7 @@ import dataclasses
 import multiprocessing as mp
 import os
 import queue
+import socket
 import threading
 import time
 import traceback
@@ -17,7 +18,7 @@ from .env import task_spec
 from .model import build_model
 from .play import play_games
 from .search import Search
-from .storage import decode_weights, encode_game, receive, send
+from .storage import decode_weights, encode_game, receive, send, source_identity
 
 
 def worker_loop(connection, experiment: Experiment, system: System, device: str):
@@ -262,12 +263,16 @@ class ActorPool:
     def wait_local(self):
         """Do not assign an entire first round to whichever process boots first."""
         deadline = time.monotonic() + self.system.timeout
+        remote_ready = []
         while any(p.alive and p.device is not None and not p.ready for p in self.peers):
             result = self.poll()
+            if result and result[0].device is None and result[1]["kind"] == "ready":
+                remote_ready.append(result[1])
             if result and result[1]["kind"] == "error":
                 raise RuntimeError(result[1]["error"])
             if time.monotonic() > deadline:
                 raise TimeoutError("local actors did not initialize")
+        return remote_ready
 
     def poll(self, timeout=0.1):
         self.available()
@@ -320,7 +325,15 @@ def actor_node(address, system):
             raise ValueError("remote experiment identity mismatch")
         pool = ActorPool(experiment, dataclasses.replace(system, listen=None))
         pool.wait_local()
-        send(connection, {"kind": "ready", "capacity": capacity})
+        send(
+            connection,
+            {
+                "kind": "ready",
+                "capacity": capacity,
+                "hostname": socket.gethostname(),
+                "actor_source_sha256": source_identity(),
+            },
+        )
         publication, published_step = b"", -1
         while True:
             try:

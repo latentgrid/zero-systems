@@ -1,4 +1,4 @@
-# Run with NVIDIA MPS on a dedicated node; see ARCHITECTURE.md.
+# Run with NVIDIA MPS on a dedicated node; see docs/architecture.md.
 learner_devices = ["cuda:0", "cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5"]
 actor_devices = ["cuda:0", "cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5"]
 actors_per_device = 3

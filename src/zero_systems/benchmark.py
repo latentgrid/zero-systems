@@ -18,11 +18,11 @@ from .storage import versions, weight_bytes
 
 
 def benchmark(config, system, repeats=5, warmup=3):
-    metadata = versions()
     config.validate()
-    system.validate()
+    system.validate(config.batch_size)
     if repeats < 2 or warmup < 1:
         raise ValueError("use at least two measurements and one warm-up")
+    metadata = versions()
     device = system.learner_devices[0]
     setup_process(system, device, config.seed)
     env = make_environment(config, config.seed)

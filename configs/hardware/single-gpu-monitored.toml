@@ -10,9 +10,9 @@ model_updates = 1200
 log_updates = 100
 
 [[evaluations]]
-name = "minizero"
-mode = "fixed"
-opponent = "../Project-Data-Science/artifacts/baselines/minizero-selftrained/weight_iter_060000.pt"
+name = "previous-model"
+mode = "self_lag"
+lag_updates = 6000
 games = 100
 interval_updates = 6000
 seed = 7301

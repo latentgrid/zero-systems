@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import contextlib
-import math
 
 import torch
 from torch import nn
 
-from .config import Experiment, System
+from .config import Experiment, System, accumulation_passes
 from .data import Batch
 
 
@@ -94,10 +93,7 @@ class Learner:
     def step(self, batch: Batch) -> dict[str, float]:
         global_size = len(batch)
         lo, hi = shard_bounds(global_size, self.rank, self.world)
-        largest = math.ceil(global_size / self.world)
-        passes = math.ceil(largest / self.system.microbatch)
-        if hi - lo < passes:
-            raise ValueError("batch too small for nonempty equal-count accumulation passes")
+        passes = accumulation_passes(global_size, self.world, self.system.microbatch)
         self.model.train()
         self.optimizer.zero_grad(set_to_none=True)
         loss_sum = torch.zeros(3, device=self.device)

@@ -15,6 +15,7 @@ import random
 import shutil
 import struct
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -158,12 +159,16 @@ def receive(connection):
 
 def atomic_save(path: Path, record):
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".partial")
-    with temporary.open("wb") as handle:
-        torch.save(record, handle)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    temporary = path.with_name(f".checkpoint-{uuid.uuid4().hex}.partial")
+    handle = temporary.open("xb")
+    try:
+        with handle:
+            torch.save(record, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def cpu_state(value):

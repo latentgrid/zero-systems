@@ -64,7 +64,7 @@ class TrainingRun:
         components=("representation", "dynamics", "prediction"),
     ):
         experiment.validate()
-        system.validate()
+        system.validate(experiment.batch_size)
         self.experiment, self.system = experiment, system
         self.directory = Path(directory)
         existing = (self.directory / "metrics.jsonl").exists() or (
@@ -103,7 +103,6 @@ class TrainingRun:
         self.pending_batch = None
         self.pool = self.group = None
         self.last_full = self.last_model = 0
-        self.journal = Journal(self.directory)
         self.last_log_time = time.monotonic()
         self.last_log_samples = 0
         self.interval_update_seconds = self.interval_batch_wait_seconds = 0.0
@@ -122,7 +121,10 @@ class TrainingRun:
                 raise ValueError("resume requires a complete training checkpoint")
             if not task_matches(restored["task"], self.task, experiment):
                 raise ValueError("resume changes observation/action encoding")
-            old = learning_settings(from_dict(restored["experiment"], Experiment))
+            previous = from_dict(restored["experiment"], Experiment)
+            if experiment.initialize and experiment.initialize != previous.initialize:
+                raise ValueError("resume cannot change the initialization checkpoint")
+            old = learning_settings(previous)
             new = learning_settings(experiment)
             if old != new:
                 raise ValueError(
@@ -155,14 +157,12 @@ class TrainingRun:
             self.published_step = restored["published_step"]
             for key in ("terminated_games", "truncated_games", "return_sum"):
                 setattr(self, key, restored["progress"].get(key, 0))
-            self.journal.recover(restored["progress"])
             self.initialization = restored.get("initialization")
         elif experiment.initialize:
             self.initialization = initialize_checkpoint(model, experiment.initialize, components)
-            self.journal.write("initialize", **self.initialization)
         payload = weight_bytes(model)
+        self.journal = None
         try:
-            self.journal.enable_tensorboard(system.tensorboard)
             self.group = LearnerGroup(
                 model, experiment, system, self.task, payload, optimizer, rngs
             )
@@ -179,12 +179,13 @@ class TrainingRun:
             self.inline = (
                 experiment.schedule == "phased" and not system.actor_devices and not system.listen
             )
+            remote_ready = []
             if not self.inline:
                 actors = system.actor_devices or (
                     () if system.listen else (system.learner_devices[0],)
                 )
                 self.pool = ActorPool(experiment, dataclasses.replace(system, actor_devices=actors))
-                self.pool.wait_local()
+                remote_ready = self.pool.wait_local()
             else:
                 self.search = Search(
                     self.learner.model,
@@ -194,6 +195,13 @@ class TrainingRun:
                     system.compile,
                     system.gpu_search,
                 )
+            # Establish devices and workers before creating or rolling back run output.
+            self.journal = Journal(self.directory)
+            if restored and existing:
+                self.journal.recover(restored["progress"])
+            elif self.initialization and not restored:
+                self.journal.write("initialize", **self.initialization)
+            self.journal.enable_tensorboard(system.tensorboard)
             self.journal.write(
                 "start",
                 experiment=dataclasses.asdict(experiment),
@@ -203,13 +211,16 @@ class TrainingRun:
                 resume=str(resume) if resume else None,
                 resumed_seconds=self.previous_seconds,
             )
+            for message in remote_ready:
+                self._log_remote_actor(message)
             self.save_model(force=True)
         except BaseException:
             if self.pool:
                 self.pool.close()
             if self.group:
                 self.group.close()
-            self.journal.close()
+            if self.journal is not None:
+                self.journal.close()
             raise
 
     def progress(self):
@@ -332,6 +343,15 @@ class TrainingRun:
             job["peer"] = peer
             peer.submit(job["work"], job["payload"])
 
+    def _log_remote_actor(self, message):
+        self.journal.write(
+            "remote_actor_connected",
+            **self.progress(),
+            capacity=message["capacity"],
+            hostname=message.get("hostname"),
+            actor_source_sha256=message.get("actor_source_sha256"),
+        )
+
     def _receive(self, timeout=0.1):
         start = time.monotonic()
         result = self.pool.poll(timeout)
@@ -341,6 +361,8 @@ class TrainingRun:
         peer, message, payload = result
         kind = message["kind"]
         if kind == "ready":
+            if peer.device is None:
+                self._log_remote_actor(message)
             return
         work = peer.active
         if work is None:
@@ -444,81 +466,82 @@ class TrainingRun:
         self.pending_batch = future.result() if future else None
         self.interval_batch_wait_seconds += time.monotonic() - wait_start
         if self.learner.updates % self.system.log_updates == 0:
-            entropy = (-torch.xlogy(batch.policy, batch.policy).sum(-1) * batch.valid).mean(0)
-            policy_entropy = float(entropy[0] + entropy[1:].mean())
-            now = time.monotonic()
-            interval = now - self.last_log_time
-            rate = (self.learner.samples - self.last_log_samples) / interval
-            self.journal.write(
-                "learn",
-                **self.progress(),
-                loss=metrics["loss"],
-                policy_loss=metrics["policy_loss"],
-                value_loss=metrics["value_loss"],
-                reward_loss=metrics["reward_loss"],
-                policy_entropy=policy_entropy,
-                policy_kl=metrics["policy_loss"] - policy_entropy,
-                grad_norm=metrics["grad_norm"],
-                learning_rate=self.experiment.learning_rate,
-                games_per_update=self.games / self.learner.updates,
-                target_games_per_update=float(self.experiment.game_ratio)
-                if not self.experiment.position_ratio
-                else None,
-                update_seconds=update_seconds,
-                interval_samples_per_second=rate,
-                interval_updates_per_second=rate / self.experiment.batch_size,
-                interval_positions_per_second=(self.positions - self.last_log_positions) / interval,
-                interval_games_per_second=(self.games - self.last_log_games) / interval,
-                interval_remote_positions_per_second=(
-                    self.remote_positions - self.last_log_remote_positions
-                )
-                / interval,
-                interval_local_positions_per_second=(
-                    self.positions
-                    - self.last_log_positions
-                    - self.remote_positions
-                    + self.last_log_remote_positions
-                )
-                / interval,
-                interval_samples_per_position=(self.learner.samples - self.last_log_samples)
-                / (self.positions - self.last_log_positions)
-                if self.positions > self.last_log_positions
-                else None,
-                target_samples_per_position=self.experiment.samples_per_position,
-                available_credit=float(
-                    self.experiment.position_ratio * self.positions - self.learner.samples
-                )
-                if self.experiment.position_ratio
-                else float(
-                    self.games / self.experiment.game_ratio * self.experiment.batch_size
-                    - self.learner.samples
-                ),
-                mean_episode_length=self.positions / max(1, self.games),
-                mean_episode_return=self.return_sum / max(1, self.games),
-                termination_fraction=self.terminated_games / max(1, self.games),
-                truncation_fraction=self.truncated_games / max(1, self.games),
-                resignation_fraction=self.resigned_games / max(1, self.games),
-                false_resignation_fraction=self.false_resignations / max(1, self.resignation_tests),
-                interval_update_seconds=self.interval_update_seconds,
-                interval_batch_wait_seconds=self.interval_batch_wait_seconds,
-                interval_poll_seconds=self.interval_poll_seconds,
-                interval_decode_seconds=self.interval_decode_seconds,
-                interval_accept_seconds=self.interval_accept_seconds,
-                interval_data_wait_seconds=self.interval_data_wait_seconds,
-                interval_actor_throttle_seconds=self.interval_actor_throttle_seconds,
-                sample_model_age_updates=float(
-                    self.learner.updates - batch.model_steps.float().mean()
-                ),
-                replay_positions=self.replay.positions,
-                replay_games=len(self.replay.games),
+            self._log_update(batch, metrics, update_seconds)
+
+    def _log_update(self, batch, metrics, update_seconds):
+        entropy = (-torch.xlogy(batch.policy, batch.policy).sum(-1) * batch.valid).mean(0)
+        policy_entropy = float(entropy[0] + entropy[1:].mean())
+        now = time.monotonic()
+        interval = now - self.last_log_time
+        rate = (self.learner.samples - self.last_log_samples) / interval
+        self.journal.write(
+            "learn",
+            **self.progress(),
+            loss=metrics["loss"],
+            policy_loss=metrics["policy_loss"],
+            value_loss=metrics["value_loss"],
+            reward_loss=metrics["reward_loss"],
+            policy_entropy=policy_entropy,
+            policy_kl=metrics["policy_loss"] - policy_entropy,
+            grad_norm=metrics["grad_norm"],
+            learning_rate=self.experiment.learning_rate,
+            games_per_update=self.games / self.learner.updates,
+            target_games_per_update=float(self.experiment.game_ratio)
+            if not self.experiment.position_ratio
+            else None,
+            update_seconds=update_seconds,
+            interval_samples_per_second=rate,
+            interval_updates_per_second=rate / self.experiment.batch_size,
+            interval_positions_per_second=(self.positions - self.last_log_positions) / interval,
+            interval_games_per_second=(self.games - self.last_log_games) / interval,
+            interval_remote_positions_per_second=(
+                self.remote_positions - self.last_log_remote_positions
             )
-            self.last_log_time, self.last_log_samples = now, self.learner.samples
-            self.last_log_positions, self.last_log_games = self.positions, self.games
-            self.last_log_remote_positions = self.remote_positions
-            self.interval_data_wait_seconds = self.interval_actor_throttle_seconds = 0.0
-            self.interval_update_seconds = self.interval_batch_wait_seconds = 0.0
-            self.interval_poll_seconds = self.interval_decode_seconds = 0.0
-            self.interval_accept_seconds = 0.0
+            / interval,
+            interval_local_positions_per_second=(
+                self.positions
+                - self.last_log_positions
+                - self.remote_positions
+                + self.last_log_remote_positions
+            )
+            / interval,
+            interval_samples_per_position=(self.learner.samples - self.last_log_samples)
+            / (self.positions - self.last_log_positions)
+            if self.positions > self.last_log_positions
+            else None,
+            target_samples_per_position=self.experiment.samples_per_position,
+            available_credit=float(
+                self.experiment.position_ratio * self.positions - self.learner.samples
+            )
+            if self.experiment.position_ratio
+            else float(
+                self.games / self.experiment.game_ratio * self.experiment.batch_size
+                - self.learner.samples
+            ),
+            mean_episode_length=self.positions / max(1, self.games),
+            mean_episode_return=self.return_sum / max(1, self.games),
+            termination_fraction=self.terminated_games / max(1, self.games),
+            truncation_fraction=self.truncated_games / max(1, self.games),
+            resignation_fraction=self.resigned_games / max(1, self.games),
+            false_resignation_fraction=self.false_resignations / max(1, self.resignation_tests),
+            interval_update_seconds=self.interval_update_seconds,
+            interval_batch_wait_seconds=self.interval_batch_wait_seconds,
+            interval_poll_seconds=self.interval_poll_seconds,
+            interval_decode_seconds=self.interval_decode_seconds,
+            interval_accept_seconds=self.interval_accept_seconds,
+            interval_data_wait_seconds=self.interval_data_wait_seconds,
+            interval_actor_throttle_seconds=self.interval_actor_throttle_seconds,
+            sample_model_age_updates=float(self.learner.updates - batch.model_steps.float().mean()),
+            replay_positions=self.replay.positions,
+            replay_games=len(self.replay.games),
+        )
+        self.last_log_time, self.last_log_samples = now, self.learner.samples
+        self.last_log_positions, self.last_log_games = self.positions, self.games
+        self.last_log_remote_positions = self.remote_positions
+        self.interval_data_wait_seconds = self.interval_actor_throttle_seconds = 0.0
+        self.interval_update_seconds = self.interval_batch_wait_seconds = 0.0
+        self.interval_poll_seconds = self.interval_decode_seconds = 0.0
+        self.interval_accept_seconds = 0.0
 
     def publish(self):
         started = time.monotonic()

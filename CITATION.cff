@@ -3,7 +3,9 @@ title: Zero Systems
 message: "If you use this software, cite this repository and the MuZero paper."
 type: software
 authors:
-  - name: Zero Systems contributors
+  - family-names: Brunner
+    given-names: Alexander
+repository-code: "https://github.com/latentgrid/zero-systems"
 version: 0.3.0
 license: MIT
 references:

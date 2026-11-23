@@ -8,6 +8,8 @@ import math
 import tomllib
 from fractions import Fraction
 from pathlib import Path
+from types import UnionType
+from typing import get_args, get_origin, get_type_hints
 
 
 @dataclasses.dataclass(frozen=True)
@@ -236,6 +238,22 @@ class Experiment:
             raise ValueError("use the explicit Go board_size, komi and max_moves settings")
 
 
+def _validate_device(name, value, precision, *, explicit_cuda=False):
+    import torch
+
+    try:
+        device = torch.device(value)
+    except (RuntimeError, TypeError) as exc:
+        raise ValueError(f"{name}: invalid device {value!r}") from exc
+    index = value.partition(":")[2]
+    if index and device.index != int(index):
+        raise ValueError(f"{name}: device {value!r} resolves to {str(device)!r}")
+    if explicit_cuda and device.type == "cuda" and device.index is None:
+        raise ValueError(f"{name}: use an explicit CUDA index such as cuda:0")
+    if precision == "bfloat16" and device.type != "cuda":
+        raise ValueError(f"{name}: bfloat16 precision requires CUDA")
+
+
 @dataclasses.dataclass(frozen=True)
 class Evaluation:
     name: str
@@ -268,6 +286,20 @@ class Evaluation:
             raise ValueError("invalid evaluation seed, openings or search")
         if self.precision not in {"float32", "bfloat16"}:
             raise ValueError("invalid evaluation precision")
+        _validate_device("evaluation device", self.device, self.precision)
+
+
+def accumulation_passes(batch_size: int, learners: int, microbatch: int) -> int:
+    """All DDP ranks must make the same number of nonempty backward passes."""
+    smallest, remainder = divmod(batch_size, learners)
+    largest = smallest + bool(remainder)
+    passes = (largest + microbatch - 1) // microbatch
+    if smallest < passes or smallest == 0:
+        raise ValueError(
+            f"batch_size={batch_size} across {learners} learners with microbatch={microbatch} "
+            "cannot give every learner a sample on every pass"
+        )
+    return passes
 
 
 @dataclasses.dataclass(frozen=True)
@@ -295,7 +327,7 @@ class System:
     tensorboard: bool = False
     evaluations: tuple[Evaluation, ...] = ()
 
-    def validate(self) -> None:
+    def validate(self, batch_size: int | None = None) -> None:
         for evaluation in self.evaluations:
             evaluation.validate()
         if len({e.name for e in self.evaluations}) != len(self.evaluations):
@@ -319,6 +351,11 @@ class System:
                 raise ValueError(f"{key} must be positive")
         if not self.learner_devices or self.timeout <= 0 or self.max_seconds < 0:
             raise ValueError("invalid devices or timeout")
+        for device in self.learner_devices:
+            _validate_device("learner_devices", device, self.precision, explicit_cuda=True)
+        actor_devices = self.actor_devices or (() if self.listen else self.learner_devices[:1])
+        for device in actor_devices:
+            _validate_device("actor_devices", device, self.actor_precision, explicit_cuda=True)
         if len(set(self.learner_devices)) != len(self.learner_devices):
             raise ValueError("learner devices must be distinct")
         if len(self.learner_devices) > 1 and not all(
@@ -328,6 +365,8 @@ class System:
         for name in ("precision", "actor_precision"):
             if getattr(self, name) not in {"float32", "bfloat16"}:
                 raise ValueError("supported precisions: float32 and bfloat16")
+        if batch_size is not None:
+            accumulation_passes(batch_size, len(self.learner_devices), self.microbatch)
 
 
 def load(path: str | Path, kind: type[Experiment] | type[System]):
@@ -342,20 +381,31 @@ def load(path: str | Path, kind: type[Experiment] | type[System]):
     return result
 
 
-def from_dict(values: dict, kind: type[Experiment] | type[System]):
-    allowed = {field.name for field in dataclasses.fields(kind)}
-    if unknown := set(values) - allowed:
+def _setting(value, annotation, name):
+    if get_origin(annotation) is UnionType:
+        # Optional settings accept None in saved checkpoints.
+        if value is None:
+            return None
+        annotation = next(t for t in get_args(annotation) if t is not type(None))
+    if get_origin(annotation) is tuple:
+        if not isinstance(value, (list, tuple)):
+            raise ValueError(f"{name} must be an array")
+        item_type = get_args(annotation)[0]
+        return tuple(_setting(item, item_type, f"{name}[{i}]") for i, item in enumerate(value))
+    if annotation is Evaluation and isinstance(value, dict):
+        if "name" not in value:
+            raise ValueError(f"{name}.name is required")
+        return from_dict(value, Evaluation)
+    if type(value) is annotation or (annotation is float and type(value) is int):
+        return value
+    raise ValueError(f"{name} must be {annotation.__name__}")
+
+
+def from_dict(values: dict, kind: type[Experiment] | type[System] | type[Evaluation]):
+    types = get_type_hints(kind)
+    if unknown := set(values) - types.keys():
         raise ValueError(f"unknown {kind.__name__} settings: {sorted(unknown)}")
-    values = dict(values)
-    if kind is System and "evaluations" in values:
-        values["evaluations"] = tuple(
-            Evaluation(**value) if isinstance(value, dict) else value
-            for value in values["evaluations"]
-        )
-    for key in ("komi", "learner_devices", "actor_devices"):
-        if key in values:
-            values[key] = tuple(values[key])
-    result = kind(**values)
+    result = kind(**{k: _setting(v, types[k], k) for k, v in values.items()})
     result.validate()
     return result
 

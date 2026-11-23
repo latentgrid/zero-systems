@@ -186,6 +186,16 @@ class BoardAttention(nn.Module):
         return self.layers(tokens).transpose(1, 2).reshape(batch, channels, height, width)
 
 
+_unfused_normalize_latent = torch.compiler.disable(normalize_latent)
+
+
+def _normalize_transformer_latent(x):
+    # Fusing LayerNorm with min/max can invalidate the saved extrema in BF16 backward.
+    if torch.is_grad_enabled():
+        return _unfused_normalize_latent(x)
+    return normalize_latent(x)
+
+
 class TransformerModel(nn.Module):
     def __init__(self, config: Experiment, task: TaskSpec):
         super().__init__()
@@ -205,7 +215,7 @@ class TransformerModel(nn.Module):
             board = torch.cat(
                 (board, context[:, :, None, None].expand(-1, -1, *board.shape[-2:])), 1
             )
-        state = normalize_latent(self.representation(board))
+        state = _normalize_transformer_latent(self.representation(board))
         policy, value = self.prediction(state)
         return state, policy, value
 
@@ -214,7 +224,7 @@ class TransformerModel(nn.Module):
         encoded = F.one_hot(action.long(), height * width + 1).to(latent.dtype)
         point = encoded[:, :-1].reshape(-1, 1, height, width)
         passed = encoded[:, -1, None, None, None].expand(-1, 1, height, width)
-        state = normalize_latent(self.dynamics(torch.cat((latent, point, passed), 1)))
+        state = _normalize_transformer_latent(self.dynamics(torch.cat((latent, point, passed), 1)))
         policy, value = self.prediction(state)
         return state, policy, value, torch.zeros_like(value)
 

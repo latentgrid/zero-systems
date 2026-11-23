@@ -7,7 +7,6 @@ WORKDIR /opt/zero-systems
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 COPY configs ./configs
-COPY systems ./systems
 RUN python -m pip install --no-cache-dir ".[all]"
 
 ENTRYPOINT ["zero-systems"]

@@ -37,9 +37,9 @@ def main():
     parser.add_argument(
         "--profile", action="store_true", help="Profile the coordinator with cProfile"
     )
-    parser.add_argument("--experiment", default="configs/go9-validation60k.toml")
-    parser.add_argument("--system", default="systems/multinode-validation.toml")
-    parser.add_argument("--remote-system", default="systems/remote-validation.toml")
+    parser.add_argument("--experiment", default="configs/experiments/go9-validation60k.toml")
+    parser.add_argument("--system", default="configs/hardware/multinode-validation.toml")
+    parser.add_argument("--remote-system", default="configs/hardware/remote-validation.toml")
     parser.add_argument("--remote", default="root@192.168.1.10")
     parser.add_argument("--remote-root", default="/mnt/user/appdata/zero-systems-validation")
     parser.add_argument("--image", default="zero-systems:multinode-next")

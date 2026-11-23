@@ -17,12 +17,13 @@ def main(argv=None):
     training.add_argument("experiment")
     training.add_argument("system")
     training.add_argument("directory")
-    training.add_argument("--resume")
+    start_from = training.add_mutually_exclusive_group()
+    start_from.add_argument("--resume")
+    start_from.add_argument("--initialize")
     training.add_argument("--updates", type=int)
     training.add_argument("--max-positions", type=int)
-    training.add_argument("--initialize")
     training.add_argument(
-        "--components", nargs="+", default=["representation", "dynamics", "prediction"]
+        "--components", nargs="+", choices=("representation", "dynamics", "prediction")
     )
     actors = commands.add_parser("actors", help="connect self-play workers to a learner")
     actors.add_argument("address")
@@ -67,6 +68,14 @@ def main(argv=None):
     benchmark.add_argument("--repeats", type=int, default=5)
     benchmark.add_argument("--warmup", type=int, default=3)
     args = parser.parse_args(argv)
+    if args.command in {"evaluate", "evaluate-episodes"}:
+        output = Path(args.output)
+        checkpoints = [Path(args.candidate)]
+        if args.command == "evaluate" and args.opponent != "random":
+            checkpoints.append(Path(args.opponent))
+        if output.exists() and any(p.exists() and output.samefile(p) for p in checkpoints):
+            parser.error("evaluation output must be a different file from the input checkpoints")
+
     if args.command == "train":
         from .run import train
 
@@ -76,12 +85,15 @@ def main(argv=None):
             for key in ("updates", "initialize", "max_positions")
             if getattr(args, key) is not None
         }
+        experiment = dataclasses.replace(experiment, **overrides)
+        if args.components and (args.resume or not experiment.initialize):
+            parser.error("--components requires initialization for a new run")
         result = train(
-            dataclasses.replace(experiment, **overrides),
+            experiment,
             load(args.system, System),
             args.directory,
             args.resume,
-            tuple(args.components),
+            tuple(args.components or ("representation", "dynamics", "prediction")),
         )
     elif args.command == "actors":
         from .workers import actor_node

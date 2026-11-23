@@ -12,7 +12,7 @@ from test_core import small
 
 from zero_systems.config import System
 from zero_systems.run import AcceptedGames, TrainingRun, train
-from zero_systems.storage import decode_game, encode_game
+from zero_systems.storage import decode_game, encode_game, source_identity
 from zero_systems.workers import actor_node
 
 
@@ -271,6 +271,10 @@ def test_remote_wire_roundtrip(tmp_path, monkeypatch):
     thread.join(timeout=5)
     assert not thread.is_alive() and not errors
     assert result["games"] == 4
+    records = [json.loads(line) for line in (tmp_path / "metrics.jsonl").read_text().splitlines()]
+    (remote,) = [r for r in records if r["event"] == "remote_actor_connected"]
+    assert remote["actor_source_sha256"] == source_identity()
+    assert remote["hostname"] == socket.gethostname()
     assert result["remote_games"] == 4
     assert result["remote_positions"] == result["positions"]
     assert result["resignation_tests"] == 4 and result["resigned_games"] == 0
