@@ -19,6 +19,7 @@ def main(argv=None):
     training.add_argument("directory")
     training.add_argument("--resume")
     training.add_argument("--updates", type=int)
+    training.add_argument("--max-positions", type=int)
     training.add_argument("--initialize")
     training.add_argument(
         "--components", nargs="+", default=["representation", "dynamics", "prediction"]
@@ -72,7 +73,7 @@ def main(argv=None):
         experiment = load(args.experiment, Experiment)
         overrides = {
             key: getattr(args, key)
-            for key in ("updates", "initialize")
+            for key in ("updates", "initialize", "max_positions")
             if getattr(args, key) is not None
         }
         result = train(

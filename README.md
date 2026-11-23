@@ -99,6 +99,15 @@ eviction does not remove it. Retries, duplicates, and evaluations earn none.
 pause at that lead; already assigned complete games may overshoot it. The
 journal records overshoot, throttling, credit, and the actual ratio after
 draining. Replay capacity and update/time stopping budgets are separate.
+An optional `max_positions` (or `--max-positions`) stops new assignments at an
+accepted-position budget. Assigned complete games still count, and learning
+finishes the credit they earn. The final reason is `position_budget`, with less
+than one batch of unused credit and explicit `position_budget_overshoot`.
+Update, time and interrupt limits can stop earlier. A budget must cover warmup
+and at least one batch. Increasing the budget on full resume keeps prior credit;
+initializing a new stage starts every scheduling counter at zero.
+Position-budget runs also save `models/final.pt` with the fully drained counters.
+It is immutable during an attempt and archived before resuming that run.
 
 ```bash
 uv run zero-systems train EXPERIMENT SYSTEM RUN --resume RUN/checkpoints/step_00001000.pt --updates 2000
@@ -172,7 +181,7 @@ traffic: use a trusted LAN or SSH tunnel. The physical test launcher
 manages only its own container, tunnel, and MPS daemon. The production runtime
 does not manage system-wide GPU services.
 
-## Development and later transfer experiments
+## Models and transfer experiments
 
 The main path is `run.py -> workers.py / play.py -> search.py -> replay.py ->
 learn.py`. Environment behavior stays in `env.py`; `evaluate.py` serves offline
@@ -180,13 +189,38 @@ and live evaluation, and `storage.py` owns snapshots and the journal. See [ARCHI
 compatibility.
 
 `--initialize CHECKPOINT --components representation dynamics prediction`
-copies selected compatible components into a fresh run. Board-size transfer
-preserves shape-compatible tensors and resets tensors with incompatible spatial
-dimensions; adding komi context zero-extends input weights. The import report records
-copied/reset/expanded tensors. Curriculum orchestration, new networks, freezing
-strategies, optimizer/loss additions, and reanalysis remain deferred.
+copies selected compatible components into a fresh run. The default residual
+`prediction_head = "dense"` retains the existing architecture and checkpoint
+behavior: incompatible spatial head tensors reset, and adding komi context
+zero-extends input weights.
+For new board-size studies, set `prediction_head = "spatial"`. Shared point
+logits use pooled global context; pass and value use pooled features plus board
+height/width. Every learned shape is independent of board size.
+`network = "transformer"` uses the same spatial heads with point tokens, fixed
+2D sinusoidal coordinates, spatial action/pass encoding and learned dynamics.
+It adds no dependency; set `attention_heads` to divide `channels` (also a multiple
+of four). Dense value-bottleneck options do not apply to spatial heads.
+
+Models are ordinary `nn.Module`s. The contract is
+`initial_inference(observation, context) -> latent, policy_logits, value` and
+`recurrent_inference(latent, action) -> latent, policy_logits, value, reward`.
+Batch is the first axis, action IDs are zero-based, and search treats latent
+axes as opaque. The named components are `representation` (h), `dynamics` (g),
+and `prediction` (f). The board models retain Go's zero intermediate reward;
+the MLP remains the general numeric-observation model.
+
+Spatial initialization strictly copies **all** selected tensors, including
+normalization buffers. It checks architecture, history/context encoding and value
+semantics while allowing different board sizes and task komi. Missing or
+mismatched selected tensors fail. Portable and full checkpoints retain the
+source hash, source progress, selected components and copied/reset tensor names.
+Optimizer, replay, RNG and stage counters start fresh; every parameter fine-tunes.
+No freezing, optimizer/loss additions, reanalysis or curriculum runner is added.
 Use `--components representation dynamics` to transfer both learned components
 while starting the complete prediction component fresh.
+Use `--components representation` for h-only or include `prediction` for full
+transfer. The bounded study and its source-inclusive accounting live in the
+sibling research repository's `experiments/09-board-transfer` directory.
 
 ```bash
 uv run ruff check src/zero_systems tests tools

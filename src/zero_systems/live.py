@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .config import System, identity
 from .evaluate import evaluate, evaluate_episodes, fingerprint
-from .storage import atomic_json
+from .storage import atomic_json, load_checkpoint
 
 
 def write_tensorboard(directory, name, result):
@@ -53,6 +53,10 @@ def watch_once(directory, system: System, *, finished=False, seen=None):
     if not models:
         return []
     steps = {p: int(p.stem.removeprefix("step_")) for p in models}
+    final = directory / "models" / "final.pt"
+    if finished and final.exists():
+        steps[final] = load_checkpoint(final)["progress"]["updates"]
+        models.append(final)
     results = []
     for settings in system.evaluations:
         folder = directory / "evaluations" / settings.name
@@ -69,11 +73,11 @@ def watch_once(directory, system: System, *, finished=False, seen=None):
             for p in models
             if steps[p] // settings.interval_updates > last // settings.interval_updates
         ]
-        if finished and steps[models[-1]] > last:
+        if finished and (steps[models[-1]] > last or models[-1] == final):
             eligible.append(models[-1])
         if not eligible:
             continue
-        candidate = max(eligible, key=steps.get)
+        candidate = max(eligible, key=lambda p: (steps[p], p == final))
         step = steps[candidate]
         opponent = settings.opponent
         if settings.mode == "self_lag":
@@ -146,7 +150,10 @@ def watch_once(directory, system: System, *, finished=False, seen=None):
             evaluation=dataclasses.asdict(settings),
             skipped_checkpoints=sorted({steps[p] for p in eligible if p != candidate}),
         )
-        path = folder / f"step_{step:08d}_{protocol[:12]}.json"
+        path = (
+            folder
+            / f"step_{step:08d}_{protocol[:12]}{('_final' if candidate == final else '')}.json"
+        )
         atomic_json(path, result)
         atomic_json(
             status_path,

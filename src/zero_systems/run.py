@@ -19,9 +19,8 @@ import torch
 from .config import Experiment, System, from_dict, learning_settings
 from .distributed import LearnerGroup
 from .env import task_matches, task_spec
-from .model import build_model, initialize
+from .model import build_model, initialize_checkpoint
 from .play import play_games
-from .reference import read_weights
 from .replay import Replay, make_batch
 from .search import Search
 from .storage import (
@@ -83,6 +82,8 @@ class TrainingRun:
         self.started = time.monotonic()
         self.previous_seconds = 0.0
         self.stop_requested = False
+        self.stop_reason = None
+        self.initialization = None
         self.generation = uuid.uuid4().hex
         self.task = task_spec(experiment)
         self.replay = Replay(experiment.replay_games, self.task)
@@ -155,14 +156,10 @@ class TrainingRun:
             for key in ("terminated_games", "truncated_games", "return_sum"):
                 setattr(self, key, restored["progress"].get(key, 0))
             self.journal.recover(restored["progress"])
+            self.initialization = restored.get("initialization")
         elif experiment.initialize:
-            weights, source_task, perspective = read_weights(
-                experiment.initialize, with_metadata=True
-            )
-            if perspective is not None and perspective != experiment.value_perspective:
-                raise ValueError("initialization changes value perspective")
-            report = initialize(model, weights, components, source_task=source_task)
-            self.journal.write("initialize", source=experiment.initialize, **report)
+            self.initialization = initialize_checkpoint(model, experiment.initialize, components)
+            self.journal.write("initialize", **self.initialization)
         payload = weight_bytes(model)
         try:
             self.journal.enable_tensorboard(system.tensorboard)
@@ -221,6 +218,12 @@ class TrainingRun:
             "learner_samples": self.learner.samples,
             "games": self.games,
             "positions": self.positions,
+            "position_budget": self.experiment.max_positions,
+            "position_budget_overshoot": max(0, self.positions - self.experiment.max_positions)
+            if self.experiment.max_positions is not None
+            else 0,
+            "collection_complete": self.collection_complete(),
+            "stopping_reason": self.stop_reason,
             "samples_per_position": self.learner.samples / self.positions
             if self.positions
             else None,
@@ -252,7 +255,16 @@ class TrainingRun:
     def stopping(self):
         if self.system.max_seconds and self.progress()["seconds"] >= self.system.max_seconds:
             self.stop_requested = True
+            self.stop_reason = self.stop_reason or "time_budget"
+        if self.stop_requested:
+            self.stop_reason = self.stop_reason or "stopped"
+        elif self.learner.updates >= self.experiment.updates:
+            self.stop_reason = self.stop_reason or "update_budget"
         return self.stop_requested or self.learner.updates >= self.experiment.updates
+
+    def collection_complete(self):
+        budget = self.experiment.max_positions
+        return budget is not None and self.positions >= budget
 
     def accept(self, game, *, remote=False):
         game.validate(self.task)
@@ -450,7 +462,8 @@ class TrainingRun:
                 learning_rate=self.experiment.learning_rate,
                 games_per_update=self.games / self.learner.updates,
                 target_games_per_update=float(self.experiment.game_ratio)
-                if not self.experiment.position_ratio else None,
+                if not self.experiment.position_ratio
+                else None,
                 update_seconds=update_seconds,
                 interval_samples_per_second=rate,
                 interval_updates_per_second=rate / self.experiment.batch_size,
@@ -513,12 +526,13 @@ class TrainingRun:
         self.published_step = self.learner.updates
         self.journal.write("publish", **self.progress(), publish_seconds=time.monotonic() - started)
 
-    def save_model(self, force=False):
+    def save_model(self, force=False, final=False):
         if not force and self.stopping():
             return
         if not force and self.learner.updates - self.last_model < self.system.model_updates:
             return
-        path = self.directory / "models" / f"step_{self.learner.updates:08d}.pt"
+        name = "final.pt" if final else f"step_{self.learner.updates:08d}.pt"
+        path = self.directory / "models" / name
         if path.exists():
             self.last_model = self.learner.updates
             return
@@ -532,11 +546,14 @@ class TrainingRun:
             "progress": self.progress(),
             "system": dataclasses.asdict(self.system),
             "source_sha256": self.source_sha256,
+            "initialization": self.initialization,
         }
         atomic_save(path, record)
         self.last_model = self.learner.updates
         self.journal.write(
-            "model_available", **self.progress(), model_path=str(path),
+            "model_available",
+            **self.progress(),
+            model_path=str(path),
             model_save_seconds=time.monotonic() - started,
         )
 
@@ -565,6 +582,7 @@ class TrainingRun:
             "progress": self.progress(),
             "replay": list(self.replay.games.values()),
             "source_sha256": self.source_sha256,
+            "initialization": self.initialization,
         }
         folder = self.directory / "checkpoints"
         atomic_save(folder / f"step_{self.learner.updates:08d}.pt", record)
@@ -604,6 +622,8 @@ class TrainingRun:
                     + config.position_lead
                     - self.positions
                 )
+                if config.max_positions is not None:
+                    headroom = min(headroom, config.max_positions - self.positions)
                 # Complete games can overshoot the soft position bound. Reserve one
                 # decision per in-flight game and cap all work through the actor pool.
                 limit = self.next_game + max(0, int(headroom) - (self.next_game - self.games))
@@ -628,6 +648,11 @@ class TrainingRun:
                     self.checkpoint()
             else:
                 self.interval_data_wait_seconds += time.monotonic() - started
+                if self.collection_complete() and not self.jobs:
+                    # All assigned games are accepted and less than one batch of
+                    # credit remains. Collection and credit completion are distinct.
+                    self.stop_reason = "position_budget"
+                    break
             if throttled:
                 self.interval_actor_throttle_seconds += time.monotonic() - started
             if before != (self.games, self.learner.updates):
@@ -653,6 +678,8 @@ class TrainingRun:
                 else:
                     self.asynchronous()
                 self.save_model(force=True)
+                if self.experiment.max_positions is not None:
+                    self.save_model(force=True, final=True)
                 self.checkpoint()
                 result = self.progress()
                 if watcher is not None:
@@ -675,7 +702,7 @@ class TrainingRun:
                 self.journal.write(
                     "finished",
                     **result,
-                    reason="stopped" if self.stop_requested else "update_budget",
+                    reason=self.stop_reason,
                 )
                 return result
         except BaseException as error:

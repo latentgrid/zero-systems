@@ -22,6 +22,8 @@ class Experiment:
     condition_komi: bool = False
     max_moves: int = 163
     network: str = "residual"
+    prediction_head: str = "dense"
+    attention_heads: int = 4
     channels: int = 256
     blocks: int = 3
     value_hidden: int = 256
@@ -65,6 +67,7 @@ class Experiment:
     samples_per_position: float | None = None
     warmup_positions: int = 10000
     position_lead: int = 20000
+    max_positions: int | None = None
     publish_updates: int = 200
     seed: int = 303
     updates: int = 12000
@@ -106,6 +109,13 @@ class Experiment:
                 self.warmup_positions, math.ceil(self.batch_size / self.position_ratio)
             ):
                 raise ValueError("position lead must permit warmup and a complete learner batch")
+        if self.max_positions is not None:
+            if self.position_ratio is None or type(self.max_positions) is not int:
+                raise ValueError("max_positions requires async position scheduling and an integer")
+            if self.max_positions < max(
+                self.warmup_positions, math.ceil(self.batch_size / self.position_ratio)
+            ):
+                raise ValueError("position budget must permit warmup and a complete learner batch")
         for field in dataclasses.fields(self):
             value = getattr(self, field.name)
             if isinstance(value, (float, int)) and not math.isfinite(value):
@@ -134,8 +144,25 @@ class Experiment:
                 raise ValueError(f"{key} must be positive")
         if self.search not in {"puct", "gumbel"}:
             raise ValueError("search must be puct or gumbel")
-        if self.network not in {"residual", "mlp"}:
-            raise ValueError("network must be residual or mlp")
+        if self.network not in {"residual", "mlp", "transformer"}:
+            raise ValueError("network must be residual, mlp or transformer")
+        if self.prediction_head not in {"dense", "spatial"}:
+            raise ValueError("prediction_head must be dense or spatial")
+        if self.network == "mlp" and self.prediction_head != "dense":
+            raise ValueError("spatial heads require a board network")
+        if self.network == "transformer" and (
+            self.prediction_head != "spatial"
+            or self.attention_heads <= 0
+            or self.channels % self.attention_heads
+            or self.channels % 4
+        ):
+            raise ValueError(
+                "transformer requires spatial heads and channels divisible by heads and 4"
+            )
+        if self.prediction_head == "spatial" and (
+            self.value_bottleneck_slope != 0 or not self.value_bottleneck_bias
+        ):
+            raise ValueError("value bottleneck options apply only to dense residual heads")
         if not 0 <= self.value_bottleneck_slope <= 1 or (
             self.network != "residual" and self.value_bottleneck_slope != 0
         ):
@@ -336,7 +363,7 @@ def from_dict(values: dict, kind: type[Experiment] | type[System]):
 def learning_settings(config: Experiment):
     """Canonical settings for resume, including legacy game-ratio configurations."""
     result = dataclasses.asdict(config)
-    for key in ("updates", "initialize"):
+    for key in ("updates", "initialize", "max_positions"):
         result.pop(key)
     if config.schedule == "async":
         for key in ("games_per_round", "updates_per_round", "games_per_update"):

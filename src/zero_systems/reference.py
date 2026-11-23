@@ -50,8 +50,9 @@ def convert_minizero_weights(weights):
     return result
 
 
-def read_weights(path, *, with_metadata=False):
+def read_weights(path, *, with_metadata=False, with_record=False):
     task, perspective = None, None
+    record = {}
     try:
         script = torch.jit.load(str(path), map_location="cpu")
     except (RuntimeError, ValueError):
@@ -75,6 +76,8 @@ def read_weights(path, *, with_metadata=False):
         side = int((weights["prediction.policy.2.bias"].shape[0] - 1) ** 0.5)
         task = TaskSpec((inputs, side, side), side * side + 1, 2, encoding="go-relative-history-v1")
         perspective = "player0"
+    if with_record:
+        return weights, task, perspective, record
     return (weights, task, perspective) if with_metadata else weights
 
 

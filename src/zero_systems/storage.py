@@ -225,11 +225,16 @@ class Journal:
                 if int(model.stem.removeprefix("step_")) > progress["updates"]:
                     (archive / folder).mkdir(exist_ok=True)
                     shutil.move(model, archive / folder / model.name)
+        final = self.directory / "models" / "final.pt"
+        if final.exists():
+            (archive / "models").mkdir(exist_ok=True)
+            shutil.move(final, archive / "models" / final.name)
         for result in (self.directory / "evaluations").glob("*/*.json"):
             record = json.loads(result.read_text())
             if (
                 record.get("candidate", {}).get("progress", {}).get("updates", 0)
                 > progress["updates"]
+                or Path(record.get("candidate", {}).get("path", "")).name == "final.pt"
             ):
                 target = archive / result.relative_to(self.directory)
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -260,6 +265,8 @@ class Journal:
                 "seconds",
                 "remote_games",
                 "remote_positions",
+                "position_budget",
+                "position_budget_overshoot",
             ),
             "learning": (
                 "loss",
@@ -327,9 +334,7 @@ class Journal:
                     )
 
     def write(self, event: str, **values):
-        record = {
-            "event": event, "time": time.time(), "monotonic_time": time.monotonic(), **values
-        }
+        record = {"event": event, "time": time.time(), "monotonic_time": time.monotonic(), **values}
         if "policy_entropy" in record:
             record["target_policy_entropy"] = record["policy_entropy"]
         self.handle.write(json.dumps(record, allow_nan=False) + "\n")

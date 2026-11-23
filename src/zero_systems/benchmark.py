@@ -10,9 +10,8 @@ import torch
 
 from .distributed import LearnerGroup, setup_process
 from .env import make_environment
-from .model import build_model, initialize
+from .model import build_model, initialize_checkpoint
 from .play import play_games
-from .reference import read_weights
 from .replay import Replay, make_batch
 from .search import Search
 from .storage import versions, weight_bytes
@@ -30,10 +29,7 @@ def benchmark(config, system, repeats=5, warmup=3):
     position = env.position()
     model = build_model(config, env.task)
     if config.initialize:
-        weights, source_task, perspective = read_weights(config.initialize, with_metadata=True)
-        if perspective is not None and perspective != config.value_perspective:
-            raise ValueError("initialization changes value perspective")
-        initialize(model, weights, source_task=source_task)
+        initialize_checkpoint(model, config.initialize)
     group = LearnerGroup(model, config, system, env.task, weight_bytes(model))
     search = Search(
         group.learner.model,
