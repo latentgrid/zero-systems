@@ -1,0 +1,10 @@
+# Run with NVIDIA MPS on a dedicated node; see ARCHITECTURE.md.
+learner_devices = ["cuda:0", "cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5"]
+actor_devices = ["cuda:0", "cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5"]
+actors_per_device = 3
+actor_batch = 128
+microbatch = 256
+precision = "bfloat16"
+actor_precision = "bfloat16"
+compile = true
+timeout = 900.0

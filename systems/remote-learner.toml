@@ -1,0 +1,5 @@
+learner_devices = ["cuda:0"]
+actor_devices = []
+microbatch = 128
+listen = "0.0.0.0:47631"
+timeout = 600.0

@@ -1,0 +1,8 @@
+# Both GPUs on the remote node; FP32 also supports its RTX 2060.
+actor_devices = ["cuda:0", "cuda:1"]
+actors_per_device = 1
+actor_batch = 128
+actor_precision = "float32"
+compile = true
+deterministic = true
+timeout = 900.0

@@ -1,0 +1,10 @@
+# Validated optional precision; one microbatch per learner rank at global batch 1024.
+learner_devices = ["cuda:0", "cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5"]
+actor_devices = ["cuda:0", "cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5"]
+actors_per_device = 1
+actor_batch = 128
+microbatch = 256
+precision = "bfloat16"
+actor_precision = "bfloat16"
+compile = false
+timeout = 600.0

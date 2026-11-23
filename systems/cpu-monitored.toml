@@ -1,0 +1,14 @@
+tensorboard = true
+actor_batch = 32
+model_updates = 200
+log_updates = 25
+
+[[evaluations]]
+name = "returns"
+mode = "episodes"
+games = 30
+interval_updates = 200
+seed = 7301
+opening_moves = 0
+device = "cpu"
+batch = 32

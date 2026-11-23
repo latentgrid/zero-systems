@@ -1,0 +1,6 @@
+learner_devices = ["cpu"]
+actor_batch = 4
+microbatch = 4
+threads = 1
+log_updates = 1
+model_updates = 2

@@ -1,0 +1,16 @@
+# Original head for external weight conversion and reference-compatible studies.
+# The maintained training preset is go9.toml with the validated fixed offset.
+environment = "go"
+board_size = 9
+history = 8
+komi = [7.0]
+network = "residual"
+channels = 256
+blocks = 3
+value_hidden = 256
+value_bottleneck_slope = 0.0
+value_bottleneck_bias = true
+value_perspective = "player0"
+search = "gumbel"
+simulations = 16
+considered_actions = 16

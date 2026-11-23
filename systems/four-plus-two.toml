@@ -1,0 +1,9 @@
+# Select schedule = "async" in the experiment for overlapped collection.
+learner_devices = ["cuda:0", "cuda:1", "cuda:2", "cuda:4"]
+actor_devices = ["cuda:3", "cuda:5"]
+actors_per_device = 1
+actor_batch = 128
+microbatch = 128
+precision = "float32"
+actor_precision = "float32"
+timeout = 600.0

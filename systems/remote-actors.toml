@@ -1,0 +1,4 @@
+actor_devices = ["cuda:0"]
+actors_per_device = 1
+actor_batch = 64
+timeout = 600.0

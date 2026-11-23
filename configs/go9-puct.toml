@@ -1,0 +1,5 @@
+# Original MuZero-style PUCT with tree Q normalization and root Dirichlet noise.
+# This is a practical smoke/development budget, not a published-paper reproduction.
+search = "puct"
+simulations = 64
+rescale_q = true

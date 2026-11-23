@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zero-systems"
+version = "0.3.0"
+description = "Readable, high-performance MuZero systems research"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+  "numba>=0.60",
+  "numpy>=1.26",
+  "tensorboard>=2.20",
+  "torch>=2.4",
+]
+
+[project.optional-dependencies]
+go = ["open-spiel>=1.5"]
+gym = ["gymnasium>=1.0"]
+all = ["open-spiel>=1.5", "gymnasium>=1.0"]
+dev = [
+  "gymnasium>=1.0",
+  "open-spiel>=1.5",
+  "pytest>=8",
+  "ruff>=0.9",
+]
+
+[project.scripts]
+zero-systems = "zero_systems.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "cuda: requires a CUDA GPU",
+  "integration: runs a complete multi-process training path",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

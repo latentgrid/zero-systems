@@ -1,0 +1,38 @@
+cff-version: 1.2.0
+title: Zero Systems
+message: "If you use this software, cite this repository and the MuZero paper."
+type: software
+authors:
+  - name: Zero Systems contributors
+version: 0.3.0
+license: MIT
+references:
+  - type: article
+    title: Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model
+    authors:
+      - family-names: Schrittwieser
+        given-names: Julian
+      - family-names: Antonoglou
+        given-names: Ioannis
+      - family-names: Hubert
+        given-names: Thomas
+      - family-names: Simonyan
+        given-names: Karen
+      - family-names: Sifre
+        given-names: Laurent
+      - family-names: Schmitt
+        given-names: Simon
+      - family-names: Guez
+        given-names: Arthur
+      - family-names: Lockhart
+        given-names: Edward
+      - family-names: Hassabis
+        given-names: Demis
+      - family-names: Graepel
+        given-names: Thore
+      - family-names: Lillicrap
+        given-names: Timothy
+      - family-names: Silver
+        given-names: David
+    year: 2020
+    doi: 10.1038/s41586-020-03051-4

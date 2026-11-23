@@ -1,0 +1,21 @@
+learner_devices = ["cuda:0"]
+actor_devices = ["cuda:0"]
+actor_batch = 128
+microbatch = 256
+precision = "bfloat16"
+actor_precision = "bfloat16"
+compile = true
+tensorboard = true
+model_updates = 1200
+log_updates = 100
+
+[[evaluations]]
+name = "minizero"
+mode = "fixed"
+opponent = "../Project-Data-Science/artifacts/baselines/minizero-selftrained/weight_iter_060000.pt"
+games = 100
+interval_updates = 6000
+seed = 7301
+device = "cuda:0"
+batch = 32
+simulations = 16

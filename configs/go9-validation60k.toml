@@ -1,0 +1,27 @@
+# Development comparison; seed 303. Reserved confirmatory seeds remain untouched.
+environment = "go"
+board_size = 9
+history = 8
+komi = [7.0]
+network = "residual"
+channels = 256
+blocks = 3
+value_hidden = 256
+value_bottleneck_slope = 0.0
+value_bottleneck_bias = false
+value_perspective = "player0"
+search = "gumbel"
+simulations = 16
+considered_actions = 16
+batch_size = 1024
+unroll = 5
+td_steps = 163
+replay_games = 40000
+schedule = "async"
+games_per_round = 2000
+updates_per_round = 200
+warmup_games = 2000
+game_lead = 2000
+publish_updates = 200
+seed = 303
+updates = 60000

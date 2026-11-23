@@ -1,0 +1,17 @@
+board_size = 3
+history = 2
+komi = [1.0]
+channels = 8
+blocks = 1
+value_hidden = 8
+max_moves = 19
+simulations = 4
+considered_actions = 4
+batch_size = 4
+unroll = 2
+games_per_round = 4
+updates_per_round = 2
+warmup_games = 4
+replay_games = 8
+game_lead = 4
+updates = 4

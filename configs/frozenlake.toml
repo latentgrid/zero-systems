@@ -1,0 +1,23 @@
+environment = "FrozenLake-v1"
+network = "mlp"
+channels = 64
+augmentation = false
+value_perspective = "to_play"
+search = "puct"
+rescale_q = true
+simulations = 16
+reward_weight = 1.0
+discount = 0.99
+td_steps = 10
+max_moves = 100
+learning_rate = 0.01
+batch_size = 64
+games_per_round = 32
+updates_per_round = 16
+warmup_games = 32
+game_lead = 32
+replay_games = 1000
+updates = 1000
+
+[environment_kwargs]
+is_slippery = false
