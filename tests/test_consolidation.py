@@ -47,6 +47,7 @@ def test_general_environment_workflow(tmp_path, environment, kwargs, search):
         evaluation = evaluate(checkpoint, checkpoint, games=4, simulations=4, opening_moves=0)
         assert evaluation["score"] == 0.5
     assert np.isfinite(evaluation["mean_return"])
+    assert result["games"] == 4
     assert result["learner_samples"] == 8
     if environment == "spiel:cliff_walking":
         saved = torch.load(tmp_path / "checkpoints/step_00000002.pt", weights_only=False)

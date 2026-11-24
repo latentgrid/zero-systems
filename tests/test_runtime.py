@@ -208,21 +208,6 @@ def test_board_transfer_and_new_context_are_explicit():
     torch.testing.assert_close(target.dynamics[0][0].weight, source.dynamics[0][0].weight)
 
 
-@pytest.mark.parametrize("environment", ["CartPole-v1", "spiel:tic_tac_toe"])
-def test_general_reward_learning_path(tmp_path, environment):
-    config = small(
-        environment=environment,
-        network="mlp",
-        augmentation=False,
-        search="puct",
-        reward_weight=1.0,
-        value_perspective="to_play",
-        updates=2,
-    )
-    result = train(config, System(actor_batch=4), tmp_path)
-    assert result["games"] == 4 and result["learner_samples"] == 8
-
-
 def test_paired_arena_swaps_colors(tmp_path):
     from zero_systems.evaluate import evaluate
 

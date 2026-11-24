@@ -1,5 +1,7 @@
 # Zero Systems
 
+[![CPU checks](https://github.com/latentgrid/zero-systems/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/latentgrid/zero-systems/actions/workflows/ci.yml?query=branch%3Amain+event%3Apush)
+
 Zero Systems is a performance-optimized PyTorch implementation of MuZero for
 training agents through self-play. You can train on a single GPU, share learning
 across several GPUs, or add machines to generate more self-play games. We

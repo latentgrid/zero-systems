@@ -1,0 +1,28 @@
+name: CPU checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - name: Install test dependencies with CPU PyTorch
+        run: |
+          uv venv
+          uv export --locked --extra dev --no-emit-project --no-hashes > "$RUNNER_TEMP/constraints.txt"
+          uv pip install --torch-backend cpu -c "$RUNNER_TEMP/constraints.txt" -e '.[dev]'
+      - name: Check code and formatting
+        run: |
+          .venv/bin/ruff check src tests tools examples
+          .venv/bin/ruff format --check src tests tools examples
+      - name: Run CPU tests
+        run: .venv/bin/pytest -q -m "not cuda"
